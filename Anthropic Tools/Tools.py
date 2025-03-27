@@ -27,6 +27,7 @@ class ToolsFramework:
         self.tools = tools
         self.tool_handlers = tool_handlers
         self.system_prompt = system_prompt
+        logger.info(f"Initialized ToolsFramework with model: {self.model}")
 
     def process_message(self, user_message, conversation_history=None):
         """
@@ -97,7 +98,7 @@ class ToolsFramework:
 
         # Extract the final text response
         final_response = next(
-            (block.text for block in response.content if hasattr(block, "text")),
+            (block.text for block in response.content if block.type == "text"),
             None,
         )
 
@@ -116,106 +117,13 @@ class ToolsFramework:
         kwargs = {
             "model": self.model,
             "max_tokens": self.max_tokens,
-            "tools": self.tools,
             "messages": messages
         }
         
         if self.system_prompt:
             kwargs["system"] = self.system_prompt
+        
+        if self.tools:
+            kwargs["tools"] = self.tools
             
         return self.client.messages.create(**kwargs)
-
-# Example tools and handlers for a customer service application
-CUSTOMER_SERVICE_TOOLS = [
-    {
-        "name": "get_customer_info",
-        "description": "Retrieves customer information based on their customer ID. Returns the customer's name, email, and phone number.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "customer_id": {
-                    "type": "string",
-                    "description": "The unique identifier for the customer."
-                }
-            },
-            "required": ["customer_id"]
-        }
-    },
-    {
-        "name": "get_order_details",
-        "description": "Retrieves the details of a specific order based on the order ID. Returns the order ID, product name, quantity, price, and order status.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "order_id": {
-                    "type": "string",
-                    "description": "The unique identifier for the order."
-                }
-            },
-            "required": ["order_id"]
-        }
-    },
-    {
-        "name": "cancel_order",
-        "description": "Cancels an order based on the provided order ID. Returns a confirmation message if the cancellation is successful.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "order_id": {
-                    "type": "string",
-                    "description": "The unique identifier for the order to be cancelled."
-                }
-            },
-            "required": ["order_id"]
-        }
-    }
-]
-
-def get_customer_info(params):
-    # Simulated customer data
-    customers = {
-        "C1": {"name": "John Doe", "email": "john@example.com", "phone": "123-456-7890"},
-        "C2": {"name": "Jane Smith", "email": "jane@example.com", "phone": "987-654-3210"}
-    }
-    return customers.get(params["customer_id"], "Customer not found")
-
-def get_order_details(params):
-    # Simulated order data
-    orders = {
-        "O1": {"id": "O1", "product": "Widget A", "quantity": 2, "price": 19.99, "status": "Shipped"},
-        "O2": {"id": "O2", "product": "Gadget B", "quantity": 1, "price": 49.99, "status": "Processing"}
-    }
-    return orders.get(params["order_id"], "Order not found")
-
-def cancel_order(params):
-    # Simulated order cancellation
-    if params["order_id"] in ["O1", "O2"]:
-        return {"success": True, "message": f"Order {params['order_id']} has been cancelled."}
-    else:
-        return {"success": False, "message": f"Order {params['order_id']} not found or cannot be cancelled."}
-
-# Example usage for customer service application
-def example_customer_service():
-    # Create tool handlers dictionary
-    customer_service_handlers = {
-        "get_customer_info": get_customer_info,
-        "get_order_details": get_order_details,
-        "cancel_order": cancel_order
-    }
-    
-    system_prompt = "You are a helpful customer service assistant. Be friendly and concise in your responses."
-    
-    # Initialize the framework
-    framework = ToolsFramework(
-        tools=CUSTOMER_SERVICE_TOOLS, 
-        tool_handlers=customer_service_handlers,
-        system_prompt=system_prompt
-    )
-    
-    # Example interactions
-    framework.process_message("Can you tell me the email address for customer C1?")
-    framework.process_message("What is the status of order O2?")
-    framework.process_message("Please cancel order O1 for me.")
-
-if __name__ == "__main__":
-    example_customer_service()

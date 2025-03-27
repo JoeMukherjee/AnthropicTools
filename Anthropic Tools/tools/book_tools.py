@@ -5,7 +5,7 @@ from db import get_connection
 # Tool definitions
 LIST_BOOKS_TOOL = {
     "name": "list_books",
-    "description": "Lists books in the collection, optionally filtered by genre or author",
+    "description": "Lists books in the collection, optionally filtered by genre, author, or title search",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -16,6 +16,10 @@ LIST_BOOKS_TOOL = {
             "author_id": {
                 "type": "integer",
                 "description": "Optional ID of the author to filter by"
+            },
+            "title_search": {
+                "type": "string",
+                "description": "Optional text to search for in book titles"
             },
             "limit": {
                 "type": "integer",
@@ -81,6 +85,10 @@ def list_books(params):
     if params.get("author_id"):
         conditions.append("b.author_id = ?")
         query_params.append(params["author_id"])
+        
+    if params.get("title_search"):
+        conditions.append("b.title LIKE ?")
+        query_params.append(f"%{params['title_search']}%")
 
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
@@ -187,7 +195,7 @@ def format_books_response(books):
     for book in books:
         book_info = (
             f"📚 {book['title']} by {book['author']}\n"
-            f"   Genre: {book['genre']}, Published: {book['year_published']}\n"
+            f"   Published: {book['year_published']} | Genre: {book['genre']}\n"
             f"   Rating: {'⭐' * book['rating'] if book['rating'] else 'Not rated'}\n"
         )
         
