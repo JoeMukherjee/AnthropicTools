@@ -3,44 +3,12 @@ import os
 import uuid
 from config import DB_DIR
 import datetime
-import json
-import random
 
 # Define the database paths
 BOOKS_DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), DB_DIR, "books.db"))
 CONVERSATION_DB = os.path.abspath(os.path.join(os.path.dirname(__file__), DB_DIR, "conversations.db"))
-USER_DB = os.path.abspath(os.path.join(os.path.dirname(__file__), DB_DIR, "users.db"))
-
-def init_user_db():
-    """Initialize the user database"""
-    os.makedirs(DB_DIR, exist_ok=True)
-    
-    conn = sqlite3.connect(USER_DB)
-    cursor = conn.cursor()
-    
-    # Create users table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        email TEXT,
-        password_hash TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    
-    print(f"User database initialized at {USER_DB}")
 
 def init_db():
-    """Initialize all databases"""
-    init_user_db()
-    init_books_db()
-    init_conversation_db()
-    
-def init_books_db():
     """Initialize the books database with the schema and sample data"""
     # Ensure the directory exists
     os.makedirs(os.path.dirname(BOOKS_DB_PATH), exist_ok=True)
@@ -164,362 +132,130 @@ def init_books_db():
 
 def init_conversation_db():
     """Initialize the conversation database"""
-    os.makedirs(DB_DIR, exist_ok=True)
-    
+    os.makedirs(os.path.dirname(CONVERSATION_DB), exist_ok=True)
+
     conn = sqlite3.connect(CONVERSATION_DB)
     cursor = conn.cursor()
-    
-    # Create conversations table
-    cursor.execute('''
+
+    cursor.execute("""
     CREATE TABLE IF NOT EXISTS conversations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        assistant_type TEXT,
-        title TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        id TEXT PRIMARY KEY,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-    ''')
-    
-    # Create messages table
-    cursor.execute('''
+    """)
+
+    cursor.execute("""
     CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        conversation_id INTEGER,
-        sender TEXT,
+        conversation_id TEXT,
+        role TEXT,
         content TEXT,
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        user_id INTEGER
+        FOREIGN KEY (conversation_id) REFERENCES conversations (id)
     )
-    ''')
-    
-    # Create tool_calls table
-    cursor.execute('''
+    """)
+
+    cursor.execute("""
     CREATE TABLE IF NOT EXISTS tool_calls (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        conversation_id INTEGER,
+        conversation_id TEXT,
         message_id INTEGER,
         tool_name TEXT,
-        parameters TEXT,
-        result TEXT,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        tool_parameters TEXT,
+        tool_response TEXT,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (conversation_id) REFERENCES conversations (id),
+        FOREIGN KEY (message_id) REFERENCES messages (id)
     )
-    ''')
-    
+    """)
+
     conn.commit()
     conn.close()
     
     print(f"Conversation database initialized at {CONVERSATION_DB}")
 
-def create_user(username, email=None, password_hash=None):
-    """
-    Create a new user
-    
-    Args:
-        username (str): The user's username
-        email (str, optional): The user's email
-        password_hash (str, optional): The user's password hash
-    
-    Returns:
-        int: The user ID
-    """
-    conn = sqlite3.connect(USER_DB)
-    cursor = conn.cursor()
-    
-    cursor.execute(
-        "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",
-        (username, email, password_hash)
-    )
-    
-    user_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    
-    return user_id
+def get_connection():
+    """Get a database connection to the books database"""
+    os.makedirs(os.path.dirname(BOOKS_DB_PATH), exist_ok=True)
+    return sqlite3.connect(BOOKS_DB_PATH)
 
-def get_user_by_username(username):
-    """
-    Get a user by username
-    
-    Args:
-        username (str): The username to look up
-    
-    Returns:
-        dict or None: The user data if found, None otherwise
-    """
-    conn = sqlite3.connect(USER_DB)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
-    row = cursor.fetchone()
-    
-    conn.close()
-    
-    if row:
-        return dict(row)
-    return None
-
-def get_user_conversations(user_id, assistant_type=None):
-    """Get all conversations for a specific user"""
-    conn = sqlite3.connect(CONVERSATION_DB)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    query = """
-    SELECT c.id, c.title, c.assistant_type, c.created_at, c.last_updated,
-           COUNT(m.id) as message_count
-    FROM conversations c
-    LEFT JOIN messages m ON c.id = m.conversation_id
-    WHERE c.user_id = ?
-    """
-    params = [user_id]
-    
-    if assistant_type:
-        query += " AND c.assistant_type = ?"
-        params.append(assistant_type)
-        
-    query += " GROUP BY c.id ORDER BY c.created_at DESC"
-    
-    cursor.execute(query, params)
-    conversations = [dict(row) for row in cursor.fetchall()]
-    
-    conn.close()
-    return conversations
-
-def create_conversation(user_id, assistant_type="books", title=None):
-    """Create a new conversation for a user"""
-    conn = sqlite3.connect(CONVERSATION_DB)
-    cursor = conn.cursor()
-    
-    # If title is not provided, create a default one
-    if not title:
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        title = f"{assistant_type} Conversation - {timestamp}"
-    
-    cursor.execute(
-        """
-        INSERT INTO conversations 
-        (user_id, assistant_type, title) 
-        VALUES (?, ?, ?)
-        """,
-        (user_id, assistant_type, title)
-    )
-    
-    conversation_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    
-    return conversation_id
-
-def update_conversation_title(conversation_id, new_title):
-    """Update a conversation's title"""
-    conn = sqlite3.connect(CONVERSATION_DB)
-    cursor = conn.cursor()
-    
-    cursor.execute(
-        "UPDATE conversations SET title = ? WHERE id = ?",
-        (new_title, conversation_id)
-    )
-    
-    success = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
-    
-    return success
-
-def get_conversation(conversation_id):
-    """Get conversation details by ID"""
-    conn = sqlite3.connect(CONVERSATION_DB)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    cursor.execute(
-        """
-        SELECT * FROM conversations
-        WHERE id = ?
-        """, 
-        (conversation_id,)
-    )
-    
-    conversation = cursor.fetchone()
-    conn.close()
-    
-    if conversation:
-        return dict(conversation)
-    return None
+def get_conversation_connection():
+    """Get a connection to the conversation database"""
+    os.makedirs(os.path.dirname(CONVERSATION_DB), exist_ok=True)
+    return sqlite3.connect(CONVERSATION_DB)
 
 def get_messages_by_conversation_id(conversation_id):
     """Retrieve all messages for a specific conversation"""
-    conn = sqlite3.connect(CONVERSATION_DB)
+    conn = get_conversation_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT id, sender, content, timestamp FROM messages WHERE conversation_id = ? ORDER BY timestamp ASC",
+        "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY timestamp",
         (conversation_id,),
     )
 
-    rows = cursor.fetchall()
-    messages = []
-    
-    # Process each message - ensure proper role names and content format
-    for row in rows:
-        # Convert 'user' and 'assistant' to proper API format
-        role = row["sender"]
-        
-        # Ensure content is properly formatted
-        content = row["content"]
-        
-        # Create a clean message object without metadata for API compatibility
-        message = {
-            "role": role, 
-            "content": content
-        }
-        messages.append(message)
-    
+    messages = [
+        {"role": row["role"], "content": row["content"]} for row in cursor.fetchall()
+    ]
+
     conn.close()
-    
-    # If there are no messages, insert an empty system message to start the conversation
-    if not messages:
-        messages.append({
-            "role": "system", 
-            "content": "This is the start of a new conversation."
-        })
-        
     return messages
 
-def add_message(conversation_id, sender, content, user_id=None):
-    """
-    Add a message to a conversation
-    
-    Args:
-        conversation_id (int or str): The conversation ID or 'new' for a new conversation
-        sender (str): The message sender ('user' or 'assistant')
-        content (str): The message content
-        user_id (int, optional): The user ID for a new conversation
-    
-    Returns:
-        tuple: (conversation_id, message_id)
-    """
-    # Create a new conversation if needed
-    if conversation_id == 'new' and user_id:
-        conversation_id = create_conversation(user_id)
-    
-    conn = sqlite3.connect(CONVERSATION_DB)
+def add_message(conversation_id, role, content):
+    """Add a new message to the database"""
+    if conversation_id is None:
+        conversation_id = str(uuid.uuid4())
+
+    conn = get_conversation_connection()
     cursor = conn.cursor()
-    
-    # Add the message
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cursor.execute(
-        "INSERT INTO messages (conversation_id, sender, content, user_id, timestamp) VALUES (?, ?, ?, ?, ?)",
-        (conversation_id, sender, content, user_id, current_time)
-    )
-    
-    message_id = cursor.lastrowid
-    
-    # Update the conversation's last_updated timestamp
-    cursor.execute(
-        "UPDATE conversations SET last_updated = ? WHERE id = ?",
-        (current_time, conversation_id)
-    )
-    
-    conn.commit()
-    conn.close()
-    
+
+    try:
+        # Check if conversation exists
+        cursor.execute("SELECT id FROM conversations WHERE id = ?", (conversation_id,))
+        if not cursor.fetchone():
+            cursor.execute(
+                "INSERT INTO conversations (id) VALUES (?)", (conversation_id,)
+            )
+
+        cursor.execute(
+            "INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)",
+            (conversation_id, role, content),
+        )
+
+        message_id = cursor.lastrowid
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"Database error: {str(e)}")
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
     return conversation_id, message_id
 
-def add_tool_call(conversation_id, message_id, tool_name, parameters, result):
-    """
-    Add a tool call to a conversation
-    
-    Args:
-        conversation_id (int): The conversation ID
-        message_id (int): The message ID that triggered the tool call
-        tool_name (str): The name of the tool called
-        parameters (str): The tool parameters (JSON string)
-        result (str): The tool result (JSON string)
-    
-    Returns:
-        int: The tool call ID
-    """
-    conn = sqlite3.connect(CONVERSATION_DB)
+def add_tool_call(conversation_id, message_id, tool_name, tool_parameters, tool_response):
+    """Record a tool call in the database"""
+    conn = get_conversation_connection()
     cursor = conn.cursor()
-    
-    cursor.execute(
-        """
-        INSERT INTO tool_calls
-        (conversation_id, message_id, tool_name, parameters, result)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (conversation_id, message_id, tool_name, parameters, result)
-    )
-    
-    tool_call_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    
-    return tool_call_id
 
-def delete_conversation(conversation_id):
-    """
-    Delete a conversation and all its messages
-    
-    Args:
-        conversation_id (int): The conversation ID
-    
-    Returns:
-        bool: Success flag
-    """
-    conn = sqlite3.connect(CONVERSATION_DB)
-    cursor = conn.cursor()
-    
-    # Delete tool calls first (foreign key constraint)
-    cursor.execute(
-        "DELETE FROM tool_calls WHERE conversation_id = ?",
-        (conversation_id,)
-    )
-    
-    # Delete messages
-    cursor.execute(
-        "DELETE FROM messages WHERE conversation_id = ?",
-        (conversation_id,)
-    )
-    
-    # Delete the conversation
-    cursor.execute(
-        "DELETE FROM conversations WHERE id = ?",
-        (conversation_id,)
-    )
-    
-    success = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
-    
-    return success
+    try:
+        cursor.execute(
+            """
+            INSERT INTO tool_calls 
+            (conversation_id, message_id, tool_name, tool_parameters, tool_response) 
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (conversation_id, message_id, tool_name, tool_parameters, tool_response),
+        )
 
-def get_all_users():
-    """
-    Get all users
-    
-    Returns:
-        list: List of all users
-    """
-    conn = sqlite3.connect(USER_DB)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT * FROM users")
-    rows = cursor.fetchall()
-    
-    conn.close()
-    
-    return [dict(row) for row in rows]
+        conn.commit()
+        tool_call_id = cursor.lastrowid
+    except sqlite3.Error as e:
+        print(f"Database error when adding tool call: {str(e)}")
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
 
-def get_connection():
-    """Get a connection to the books database"""
-    # Ensure the directory exists
-    os.makedirs(os.path.dirname(BOOKS_DB_PATH), exist_ok=True)
-    
-    conn = sqlite3.connect(BOOKS_DB_PATH)
-    return conn 
+    return tool_call_id 
